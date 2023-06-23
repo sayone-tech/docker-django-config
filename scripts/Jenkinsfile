@@ -1,0 +1,31 @@
+pipeline {
+    agent any
+    triggers { githubPush() }
+    options { buildDiscarder(logRotator(numToKeepStr: "5")) }
+    stages {
+        stage('Updating DEV server') {
+            when { branch 'develop' }
+            steps {
+            slackSend (color: '#FFFF00', message: "BUILD STARTED: Job '${env.JOB_NAME} [${env.BUILD_NUMBER}]' (${env.BUILD_URL})")
+            withCredentials([[
+                $class: 'AmazonWebServicesCredentialsBinding',
+                accessKeyVariable: 'AWS_ACCESS_KEY_ID',
+                secretKeyVariable: 'AWS_SECRET_ACCESS_KEY',
+                credentialsId: 'dev_credentials'
+            ]]) {                
+                    sh "docker build -t ${APP_IMAGE_NAME}:${APP_DEV_IMAGE_TAG} ."
+                    sh "aws ecr get-login-password --region ${AWS_APP_REGION} | docker login --username AWS --password-stdin ${AWS_APP_ACCOUNT_ID}.dkr.ecr.${AWS_APP_REGION}.amazonaws.com"
+                    sh "docker tag ${APP_IMAGE_NAME}:${APP_DEV_IMAGE_TAG} ${AWS_APP_ACCOUNT_ID}.dkr.ecr.${AWS_APP_REGION}.amazonaws.com/${APP_IMAGE_NAME}:${APP_DEV_IMAGE_TAG}"
+                    sh "docker push ${AWS_APP_ACCOUNT_ID}.dkr.ecr.${AWS_APP_REGION}.amazonaws.com/${APP_IMAGE_NAME}:${APP_DEV_IMAGE_TAG}"
+                    sh 'scp  $WORKSPACE/docker-compose-dev.yml ubuntu@IP:/home/ubuntu/App/docker-compose.yml'
+               }
+                sh 'ssh ubuntu@IP -t "aws ecr get-login-password --region ${AWS_APP_REGION} | docker login --username AWS --password-stdin ${AWS_APP_ACCOUNT_ID}.dkr.ecr.${AWS_APP_REGION}.amazonaws.com && docker pull ${AWS_APP_ACCOUNT_ID}.dkr.ecr.${AWS_APP_REGION}.amazonaws.com/${APP_IMAGE_NAME}:${APP_DEV_IMAGE_TAG} && cd /home/ubuntu/App && docker-compose up -d --build && docker-compose run web python manage.py migrate --no-input && docker-compose run web python manage.py collectstatic --no-input && docker image prune -a -f"'
+                sh 'docker image prune -a -f'
+            }
+            post {
+                success { slackSend (color: '#00FF00', message: "App DEV SERVER UPDATION SUCCESSFULL: Job '${env.JOB_NAME} [${env.BUILD_NUMBER}] ${env.BUILD_LOG}' (${env.BUILD_URL})") }
+                failure { slackSend (color: '#FF0000', message: "App DEV SERVER UPDATION FAILED: Job '${env.JOB_NAME} [${env.BUILD_NUMBER}]' (${env.BUILD_URL})") }
+            }
+        }
+    }
+}

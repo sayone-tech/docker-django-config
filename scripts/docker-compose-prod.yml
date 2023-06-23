@@ -1,0 +1,16 @@
+version: "3.9"
+services:
+  web:
+    image: IMAGE_NAME:TAG
+    container_name: app
+    command: uwsgi --ini uwsgi.ini
+    env_file:
+      - ./kushAI.env
+  nginx:
+        image: IMAGE_NAME:TAG
+        container_name: nginx-container
+        restart: always
+        ports:
+        - 80:80
+        depends_on:
+        - web
