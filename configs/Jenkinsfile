@@ -13,7 +13,7 @@ pipeline {
                 secretKeyVariable: 'AWS_SECRET_ACCESS_KEY',
                 credentialsId: 'dev_credentials'
             ]]) {                
-                    sh "docker build -t ${APP_IMAGE_NAME}:${APP_DEV_IMAGE_TAG} ."
+                    sh "cd .. && docker build -t ${APP_IMAGE_NAME}:${APP_DEV_IMAGE_TAG} ."
                     sh "aws ecr get-login-password --region ${AWS_APP_REGION} | docker login --username AWS --password-stdin ${AWS_APP_ACCOUNT_ID}.dkr.ecr.${AWS_APP_REGION}.amazonaws.com"
                     sh "docker tag ${APP_IMAGE_NAME}:${APP_DEV_IMAGE_TAG} ${AWS_APP_ACCOUNT_ID}.dkr.ecr.${AWS_APP_REGION}.amazonaws.com/${APP_IMAGE_NAME}:${APP_DEV_IMAGE_TAG}"
                     sh "docker push ${AWS_APP_ACCOUNT_ID}.dkr.ecr.${AWS_APP_REGION}.amazonaws.com/${APP_IMAGE_NAME}:${APP_DEV_IMAGE_TAG}"
