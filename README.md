@@ -2,7 +2,9 @@
 
 + Install Docker & Docker Compose in your local machine based on your local machine operating system. 
 
-+ Create docker-compose.yml with the required services for the project using the given template. 
++ Create docker-compose.yml with the required services for the project using the given template.
+
++ Set appropriate conatainer names and service name. 
 
 + Use latest docket image verison for the services from the docker hub, eg: for postgres get the latest image tag from here https://hub.docker.com/_/postgres
 
