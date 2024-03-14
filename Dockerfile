@@ -1,4 +1,4 @@
-FROM python:3.8-slim
+FROM python:3.9-slim
 
 # Set work directory
 WORKDIR /code
@@ -6,7 +6,9 @@ WORKDIR /code
 # Install dependencies
 RUN apt-get update
 RUN pip install --upgrade pip
-RUN apt-get install gcc libpq-dev -y
+
+# Add here if any system packages are needed
+RUN apt-get install gcc libpq-dev -y 
 COPY ./requirements.txt /code/
 RUN pip install -r requirements.txt
 RUN pip install  uwsgi
