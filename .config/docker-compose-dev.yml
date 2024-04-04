@@ -12,7 +12,7 @@ services:
   web:
     image: IMAGE_NAME:TAG
     container_name: app-name
-    command: uwsgi --ini uwsgi.ini
+    command: ["./.config/wait-for-it.sh", "db:5432", "--", "uwsgi", "--ini", "uwsgi.ini"]
     ports:
       - 8000:8001
     env_file:
