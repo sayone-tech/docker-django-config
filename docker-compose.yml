@@ -1,8 +1,6 @@
 version: "3.9"
 services:
   web:
-    environment:
-      - PYTHONUNBUFFERED=1  
     build: . 
     container_name: app
     command: ["./.config/wait-for-it.sh", "db:5432", "--", "python", "manage.py", "runserver", "0.0.0.0:8000"]
@@ -16,7 +14,7 @@ services:
       - db
       - redis
   db:
-    image: postgres:15.6-alpine3.19
+    image: postgres:16.2-alpine3.19
     volumes:
       - postgres_data:/var/lib/postgresql/data/
     ports:
