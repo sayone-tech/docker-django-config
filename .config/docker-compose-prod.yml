@@ -5,7 +5,7 @@ services:
     container_name: app
     command: uwsgi --ini uwsgi.ini
     env_file:
-      - ./kushAI.env
+      - ./.env
   nginx:
         image: IMAGE_NAME:TAG
         container_name: nginx-container

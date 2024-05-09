@@ -1,11 +1,17 @@
-version: "3.9"
+name: docker-django-example #Project-Name
 services:
   web:
     build: . 
-    container_name: app
+    container_name: django-app
     command: ["./.config/wait-for-it.sh", "db:5432", "--", "python", "manage.py", "runserver", "0.0.0.0:8000"]
-    volumes:
-      - .:/code
+    develop:
+      watch:
+        - action: sync
+          path: .
+          target: /code
+          ignore:
+            - README.md
+            - .gitignore
     ports:
       - 8000:8000
     env_file:
@@ -20,24 +26,27 @@ services:
     ports:
       - 5432:5432
     env_file:
-      - ./env.db
+      - ./.env.db
   redis:
     image: "redis:alpine"
     ports:
       - 6379:6379
     volumes: 
       - cache:/data      
-  celery:
-    build: .
-    container_name: celery-app
-    command: celery -A celery-app worker -l info --concurrency=1
-    volumes:
-      - .:/code
-    env_file:
-      - ./.env
-    depends_on:
-      - db
-      - redis
+  # celery:
+  #   build: .
+  #   container_name: celery-app
+  #   command: celery -A celery-app worker -l info --concurrency=1
+    # develop:
+    #   watch:
+    #     - action: sync
+    #       path: .
+    #       target: /code
+  #   env_file:
+  #     - ./.env
+  #   depends_on:
+  #     - db
+  #     - redis
 volumes:
   postgres_data:
   cache:

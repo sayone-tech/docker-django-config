@@ -1,6 +1,6 @@
 # docker-django-config
 
-+ Install Docker & Docker Compose in your local machine based on your local machine operating system. 
++ Install Docker(26.0 or above) & Docker Compose(2.27.0 or above) in your local machine based on your local machine operating system. 
 
 + Create docker-compose.yml with the required services for the project using the given template.
 
@@ -14,12 +14,16 @@
 
 + From root folder & run: 
 ```
-docker compose up --build
+docker compose up --build --watch
 ```
-+ To run in detached mode: 
++ To build in detached mode: 
 
 ```
-docker compose up --build -d
+docker compose up --build --watch -d
+```
++ To run project without building the app
+```
+docker compose up --watch
 ```
 
 ### Make Migrations
@@ -53,13 +57,24 @@ To create a new app , run:
 docker compose exec -u 0 web python manage.py startapp appname
 ```
 
+### Mount volume
+Files inside the container will be lost once container is recreated, if you need to persist some file, like media files ,you need to mount that folder as volume in `docker-compose.yml`
+
+```
+web:
+  ....
+  volumes:
+    - media:/code/project-name/same-path-as-MEDIA_URL
+
+```
+Run `docker compose exec -u 0 web chmod -R 777 media` if you are having permission issues.
 
 ### Restarting the Application
 
 If you make changes to the `Dockerfile` or `docker-compose.yml` file, you may need to rebuild the Docker containers:
 
 ```
-docker compose up --build
+docker compose up --build --watch
 ```
 
 
