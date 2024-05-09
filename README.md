@@ -14,17 +14,14 @@
 
 + From root folder & run: 
 ```
-docker compose up --build --watch
+docker compose up --watch
 ```
 + To build in detached mode: 
 
 ```
-docker compose up --build --watch -d
+docker compose up --watch -d
 ```
-+ To run project without building the app
-```
-docker compose up --watch
-```
+
 
 ### Make Migrations
 
