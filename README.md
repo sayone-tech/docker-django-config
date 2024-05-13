@@ -87,3 +87,4 @@ docker compose down
 
 + Update the python and other services docker image version to the latest when you are setting up the project for the first time
 + Refer [docker hub](https://hub.docker.com/) and get the lastest image with less vulnerabilities.  
++ Remove db volume to recreate/remove all the DB contents.

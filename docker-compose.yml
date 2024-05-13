@@ -6,6 +6,8 @@ services:
     command: ["./.config/wait-for-it.sh", "db:5432", "--", "python", "manage.py", "runserver", "0.0.0.0:8000"]
     develop:
       watch:
+        - action: rebuild
+          path: ./requirements.txt
         - action: sync
           path: .
           target: /code

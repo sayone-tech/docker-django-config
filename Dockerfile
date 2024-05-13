@@ -15,7 +15,7 @@ rm -rf /var/lib/apt/lists/*
 
 # Install project dependencies
 COPY requirements.txt .
-RUN pip wheel --no-cache-dir --no-deps --wheel-dir /wheels -r requirements.txt 
+RUN pip install --upgrade pip && pip wheel --no-cache-dir --no-deps --wheel-dir /wheels -r requirements.txt 
 
 # Install uwsgi
 RUN pip wheel --no-cache-dir --no-deps --wheel-dir /wheels uWSGI==2.0.25.1
