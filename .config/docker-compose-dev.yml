@@ -1,51 +1,67 @@
-version: "3.9"
+name: docker-django-example #Project-Name
 services:
   nginx:
-    image: IMAGE_NAME:TAG
-    container_name: app-name-nginx
+    image: ${IMAGE_NAME}:${NGINX_TAG}
+    container_name: ${APP_NAME}-nginx
     restart: always
+    env_file:
+      - ./.env    
     ports:
       - 80:80
       - 443:443
     depends_on:
       - web
+
   web:
-    image: IMAGE_NAME:TAG
-    container_name: app-name
+    image: ${IMAGE_NAME}:${WEB_TAG}
+    container_name: ${APP_NAME}-app
     command: ["./.config/wait-for-it.sh", "db:5432", "--", "uwsgi", "--ini", "uwsgi.ini"]
-    ports:
-      - 8000:8001
+    restart: always
     env_file:
       - ./.env
     depends_on:
-      - db
-      - redis
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy        
   db:
-    image: postgres:13.9-alpine3.16
+    image: postgres:16.2-alpine3.19
+    container_name: ${APP_NAME}-db   
+    restart: always 
     volumes:
       - postgres_data:/var/lib/postgresql/data/
-    ports:
-      - 5432:5432
     env_file:
-      - ./env.db
+      - ./.env.db
+    healthcheck:
+      test: ["CMD-SHELL", "sh -c 'pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}'"]
+      interval: 10s
+      timeout: 3s
+      retries: 3         
   redis:
     image: "redis:alpine"
-    ports:
-      - 6379:6379
+    restart: always
+    container_name: ${APP_NAME}-redis    
     volumes: 
       - cache:/data      
-  celery:
-    image: IMAGE_NAME:TAG
-    container_name: celery-app
-    command: celery -A celery-app worker -l info --concurrency=1
-    env_file:
-      - ./.env
-    depends_on:
-      - db
-      - redis
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 5         
+
+  # celery:
+  #   image: ${IMAGE_NAME}:${WEB_TAG}
+  #   container_name: ${APP_NAME}-celery
+  #   command: celery -A celery-app worker -l info --concurrency=1
+  #   restart: always
+  #   env_file:
+  #     - ./.env
+  #   depends_on:
+  #     - db
+  #     - redis
 volumes:
   postgres_data:
   cache:
 networks:
-  appname:
+  ${APP_NAME}:
     driver: bridge  

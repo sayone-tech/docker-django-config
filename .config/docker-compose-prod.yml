@@ -1,14 +1,14 @@
-version: "3.9"
+name: docker-django-example #Project-Name
 services:
   web:
-    image: IMAGE_NAME:TAG
-    container_name: app
+    image: ${IMAGE_NAME}:${WEB_TAG}
+    container_name: ${APP_NAME}-app
     command: uwsgi --ini uwsgi.ini
     env_file:
       - ./.env
   nginx:
-        image: IMAGE_NAME:TAG
-        container_name: nginx-container
+        image: ${IMAGE_NAME}:${NGINX_TAG}
+        container_name: ${APP_NAME}-nginx
         restart: always
         ports:
         - 80:80

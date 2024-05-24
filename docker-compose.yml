@@ -1,9 +1,10 @@
 name: docker-django-example #Project-Name
 services:
   web:
+    image: ${IMAGE_NAME}:${WEB_TAG}
     build: . 
-    container_name: django-app
-    command: ["./.config/wait-for-it.sh", "db:5432", "--", "python", "manage.py", "runserver", "0.0.0.0:8000"]
+    container_name: ${APP_NAME}-app
+    command: ["python", "manage.py", "runserver", "0.0.0.0:8000"]
     develop:
       watch:
         - action: rebuild
@@ -15,28 +16,48 @@ services:
             - README.md
             - .gitignore
     ports:
-      - 8000:8000
+      - ${WEB_PORT}:8000
     env_file:
       - ./.env
     depends_on:
-      - db
-      - redis
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy        
+    logging:
+        driver: "json-file"
+        options:
+            max-file: 10
+            max-size: 50m        
+      
   db:
     image: postgres:16.2-alpine3.19
+    container_name: ${APP_NAME}-db
     volumes:
       - postgres_data:/var/lib/postgresql/data/
     ports:
-      - 5432:5432
+      - ${DB_PORT}:5432
     env_file:
       - ./.env.db
+    healthcheck:
+      test: ["CMD-SHELL", "sh -c 'pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}'"]
+      interval: 10s
+      timeout: 3s
+      retries: 3      
   redis:
+    container_name: ${APP_NAME}-redis
     image: "redis:alpine"
     ports:
-      - 6379:6379
+      - ${REDIS_PORT}:6379
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 5      
     volumes: 
       - cache:/data      
   # celery:
-  #   build: .
+  #   image: ${IMAGE_NAME}:${WEB_TAG}
   #   container_name: celery-app
   #   command: celery -A celery-app worker -l info --concurrency=1
     # develop:
@@ -49,9 +70,14 @@ services:
   #   depends_on:
   #     - db
   #     - redis
+    # logging:
+    #     driver: "json-file"
+    #     options:
+    #         max-file: 10
+    #         max-size: 50m  
 volumes:
   postgres_data:
   cache:
 networks:
-  appname:
+  ${APP_NAME}:
     driver: bridge  

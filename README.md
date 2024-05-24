@@ -10,6 +10,22 @@
 
 + Create environment variable files .env & env.db for web and db services of docker-compose respectively, based on the env.example file in the project's root directory
 
++ set docker env variables:
+
+#### Docker envs
+```
+APP_NAME : Application name
+IMAGE_NAME : Docker image name
+WEB_TAG : Docker image tag name for webapp
+NGINX_TAG : Docker image tag name for nginx (For Dev and prod only)
+``` 
+#### Port envs to be used for local connection
+```
+DB_PORT : Db port for external connection
+WEB_PORT : web app port for local external connection
+REDIS_PORT : Redis port for external connection
+```
+
 ## Build the project using docker-compose
 
 + From root folder & run: 
@@ -61,7 +77,7 @@ Files inside the container will be lost once container is recreated, if you need
 web:
   ....
   volumes:
-    - media:/code/project-name/same-path-as-MEDIA_URL
+    - ./media:/code/project-name/same-path-as-MEDIA_URL
 
 ```
 Run `docker compose exec -u 0 web chmod -R 777 media` if you are having permission issues.
