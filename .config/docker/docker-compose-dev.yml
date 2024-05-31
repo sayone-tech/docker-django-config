@@ -15,7 +15,7 @@ services:
   web:
     image: ${IMAGE_NAME}:${WEB_TAG}
     container_name: ${APP_NAME}-app
-    command: ["./.config/wait-for-it.sh", "db:5432", "--", "uwsgi", "--ini", "uwsgi.ini"]
+    command: ["uwsgi", "--ini", "uwsgi.ini"]
     restart: always
     env_file:
       - ./.env
