@@ -19,9 +19,11 @@ AWS_CREDENTIALS_ID : Name of the AWS credential ID added in the jenkins console.
 
 + In that case move the env file creation from secrets manager to another stage(stage 4).
 
-+ Builds the docker image and uses the image with dev server docker compose file to run the test cases.
++ Env file for the dev server will be used by the webapp or create a sample file when running the pipeline.
 
-+ Db created 
++ Env for DB should also be created in the pipeline. 
+
++ Builds the docker image and uses the image with dev server docker compose file to run the test cases.
 
 ### Stage 2: SonarQube analysis
 + Sonarqube analysis stage is mandatory for staging/dev server. Not needed for other branches.
