@@ -90,8 +90,8 @@ pipeline {
         stage('Update server configs') {
             when { branch 'develop' }
             steps {
-                    sh 'scp  $WORKSPACE/.config/docker/docker-compose-dev.yml ubuntu@${APP_NAME_SERVER}:/home/ubuntu/${APP_NAME}/docker-compose.yml'
-                    sh 'scp  $WORKSPACE/.config/docker/.env  ubuntu@${APP_NAME_SERVER}:/home/ubuntu/${APP_NAME}'
+                    sh 'scp -o StrictHostKeyChecking=no $WORKSPACE/.config/docker/docker-compose-dev.yml ubuntu@${APP_NAME_SERVER}:/home/ubuntu/${APP_NAME}/docker-compose.yml'
+                    sh 'scp -o StrictHostKeyChecking=no $WORKSPACE/.config/docker/.env  ubuntu@${APP_NAME_SERVER}:/home/ubuntu/${APP_NAME}'
             }
         }        
 
@@ -99,7 +99,7 @@ pipeline {
         stage('Update server') {
             when { branch 'develop' }
             steps {
-                    sh 'ssh ubuntu@${APP_NAME_SERVER} -t "aws ecr get-login-password --region ${AWS_REGION} | docker login --username AWS --password-stdin ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com && docker pull ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${DOCKER_IMAGE_NAME}:${DOCKER_IMAGE_TAG} && cd /home/ubuntu/APP_NAME && docker compose up -d --force-recreate --build && docker compose exec -u 0 web python manage.py migrate --no-input && docker compose exec -u 0 web python manage.py collectstatic --no-input && docker image prune -a -f"'
+                    sh 'ssh -o StrictHostKeyChecking=no ubuntu@${APP_NAME_SERVER} -t "aws ecr get-login-password --region ${AWS_REGION} | docker login --username AWS --password-stdin ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com && docker pull ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${DOCKER_IMAGE_NAME}:${DOCKER_IMAGE_TAG} && cd /home/ubuntu/APP_NAME && docker compose up -d --force-recreate --build && docker compose exec -u 0 web python manage.py migrate --no-input && docker compose exec -u 0 web python manage.py collectstatic --no-input && docker image prune -a -f"'
                     sh 'docker image prune -a -f'
                 }                                  
             post {
