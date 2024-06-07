@@ -7,14 +7,19 @@ services:
     restart: always    
     env_file:
       - ./.env
+    networks:
+      - ${APP_NAME}  
   nginx:
-        image: ${IMAGE_NAME}:${NGINX_TAG}
-        container_name: ${APP_NAME}-nginx
-        restart: always
-        ports:
-        - 80:80
-        depends_on:
-        - web
+    image: ${IMAGE_NAME}:${NGINX_TAG}
+    container_name: ${APP_NAME}-nginx
+    restart: always
+    ports:
+    - 80:80
+    - 443:443
+    depends_on:
+    - web
+    networks:
+      - ${APP_NAME}      
 networks:
   ${APP_NAME}:
     driver: bridge          

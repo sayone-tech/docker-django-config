@@ -28,7 +28,9 @@ services:
         driver: "json-file"
         options:
             max-file: 10
-            max-size: 50m        
+            max-size: 50m     
+    networks:
+      - ${APP_NAME}            
       
   db:
     image: postgres:16.2-alpine3.19
@@ -43,7 +45,9 @@ services:
       test: ["CMD-SHELL", "sh -c 'pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}'"]
       interval: 10s
       timeout: 3s
-      retries: 3      
+      retries: 3     
+    networks:
+      - ${APP_NAME}       
   redis:
     container_name: ${APP_NAME}-redis
     image: "redis:alpine"
@@ -55,7 +59,9 @@ services:
       timeout: 10s
       retries: 5      
     volumes: 
-      - cache:/data      
+      - cache:/data 
+    networks:
+      - ${APP_NAME}           
   # celery:
   #   image: ${IMAGE_NAME}:${WEB_TAG}
   #   container_name: celery-app
@@ -75,6 +81,8 @@ services:
     #     options:
     #         max-file: 10
     #         max-size: 50m  
+    # networks:
+    #   - ${APP_NAME}    
 volumes:
   postgres_data:
   cache:

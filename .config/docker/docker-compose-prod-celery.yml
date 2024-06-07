@@ -8,6 +8,9 @@ services:
     restart: always    
     env_file:
       - ./.env
+    networks:
+      - ${APP_NAME}  
+            
 networks:
   ${APP_NAME}:
     driver: bridge        
