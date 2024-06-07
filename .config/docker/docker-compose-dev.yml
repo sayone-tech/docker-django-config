@@ -12,7 +12,7 @@ services:
     depends_on:
       - web
     networks:
-      - ${APP_NAME}      
+      - app-network      
 
   web:
     image: ${IMAGE_NAME}:${WEB_TAG}
@@ -27,7 +27,7 @@ services:
       redis:
         condition: service_healthy 
     networks:
-      - ${APP_NAME}                
+      - app-network                
   db:
     image: postgres:16.2-alpine3.19
     container_name: ${APP_NAME}-db   
@@ -42,7 +42,7 @@ services:
       timeout: 3s
       retries: 3    
     networks:
-      - ${APP_NAME}            
+      - app-network            
   redis:
     image: "redis:alpine"
     restart: always
@@ -55,7 +55,7 @@ services:
       timeout: 10s
       retries: 5      
     networks:
-      - ${APP_NAME}          
+      - app-network          
 
   # celery:
   #   image: ${IMAGE_NAME}:${WEB_TAG}
@@ -68,7 +68,7 @@ services:
   #     - db
   #     - redis
     # networks:
-    #   - ${APP_NAME}   
+    #   - app-network   
 
   certbot:
     image: certbot/certbot:latest
@@ -76,11 +76,11 @@ services:
       - ./certbot/www/:/var/www/certbot/:rw
       - ./certbot/conf/:/etc/letsencrypt/:rw 
     networks:
-      - ${APP_NAME}       
+      - app-network       
       
 volumes:
   postgres_data:
   cache:
 networks:
-  ${APP_NAME}:
-    driver: bridge  
+  app-network:
+    name: ${APP_NAME}

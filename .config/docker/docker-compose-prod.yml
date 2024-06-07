@@ -8,7 +8,7 @@ services:
     env_file:
       - ./.env
     networks:
-      - ${APP_NAME}  
+      - app-network  
   nginx:
     image: ${IMAGE_NAME}:${NGINX_TAG}
     container_name: ${APP_NAME}-nginx
@@ -19,7 +19,7 @@ services:
     depends_on:
     - web
     networks:
-      - ${APP_NAME}      
+      - app-network      
 networks:
-  ${APP_NAME}:
-    driver: bridge          
+  app-network:
+    name: ${APP_NAME}       

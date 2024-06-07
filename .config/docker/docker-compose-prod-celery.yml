@@ -10,7 +10,7 @@ services:
       - ./.env
     networks:
       - ${APP_NAME}  
-            
+
 networks:
-  ${APP_NAME}:
-    driver: bridge        
+  app-network:
+    name: ${APP_NAME}    

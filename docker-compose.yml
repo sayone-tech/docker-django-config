@@ -30,7 +30,7 @@ services:
             max-file: 10
             max-size: 50m     
     networks:
-      - ${APP_NAME}            
+      - app-network 
       
   db:
     image: postgres:16.2-alpine3.19
@@ -47,7 +47,7 @@ services:
       timeout: 3s
       retries: 3     
     networks:
-      - ${APP_NAME}       
+      - app-network  
   redis:
     container_name: ${APP_NAME}-redis
     image: "redis:alpine"
@@ -61,7 +61,7 @@ services:
     volumes: 
       - cache:/data 
     networks:
-      - ${APP_NAME}           
+      - app-network
   # celery:
   #   image: ${IMAGE_NAME}:${WEB_TAG}
   #   container_name: celery-app
@@ -82,10 +82,10 @@ services:
     #         max-file: 10
     #         max-size: 50m  
     # networks:
-    #   - ${APP_NAME}    
+    #   - app-network 
 volumes:
   postgres_data:
   cache:
 networks:
-  ${APP_NAME}:
-    driver: bridge  
+  app-network:
+    name: ${APP_NAME}
