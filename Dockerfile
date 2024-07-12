@@ -24,9 +24,6 @@ RUN pip wheel --no-cache-dir --no-deps --wheel-dir /wheels uWSGI==2.0.25.1
 # ---- Copy Files/Build ----
 FROM base AS release
 
-# Copy app user
-COPY --from=builder /etc/passwd /etc/passwd
-
 # Copy project dependencies
 COPY --from=builder /wheels /wheels
 COPY --from=builder /code .

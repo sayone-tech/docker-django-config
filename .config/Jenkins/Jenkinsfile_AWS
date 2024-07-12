@@ -1,7 +1,11 @@
 pipeline {
     agent any
     triggers { githubPush() }
-    options { buildDiscarder(logRotator(numToKeepStr: "3")) }   
+    options { 
+        buildDiscarder(logRotator(numToKeepStr: "3")) 
+        disableConcurrentBuilds()
+
+    }   
     environment {
         APP_NAME = "App_Name"
         AWS_SECRET_MANAGER = "${APP_NAME_AWS_SECRET_MANAGER}"
