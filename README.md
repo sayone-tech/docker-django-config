@@ -38,13 +38,12 @@ docker compose up --watch
 docker compose up --watch -d
 ```
 
-
 ### Make Migrations
 
 To create database migrations, run the following command:
 
 ```
-docker compose exec -u 0 web python manage.py makemigrations
+docker compose run --rm -u 0 -v "$PWD":/app -w /app web python manage.py makemigrations
 ```
 ### Apply Migrations
 
@@ -67,7 +66,7 @@ docker compose exec web python manage.py createsuperuser
 To create a new app , run:
 
 ```
-docker compose exec -u 0 web python manage.py startapp appname
+docker compose run --rm -u 0 -v "$PWD":/app -w /app web python manage.py startapp appname
 ```
 
 ### Mount volume
@@ -89,7 +88,6 @@ If you make changes to the `Dockerfile` or `docker-compose.yml` file, you may ne
 ```
 docker compose up --build --watch
 ```
-
 
 + Go to http://localhost:8000/ on your browser
 
