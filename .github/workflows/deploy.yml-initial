@@ -1,0 +1,148 @@
+name: Deploy to AWS
+
+on:
+  push:
+    branches: [ develop ]
+
+env:
+  APP_NAME: "App_Name"
+  AWS_REGION: ${{ secrets.AWS_REGION }}
+  DOCKER_IMAGE_NAME: ${{ secrets.DOCKER_IMAGE_NAME }}
+  DOCKER_IMAGE_TAG: ${{ secrets.DOCKER_IMAGE_TAG }}
+  AWS_ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}
+  SERVER_NAME: ${{ secrets.SERVER_NAME }}
+  AWS_SECRET_MANAGER: ${{ secrets.AWS_SECRET_MANAGER }}
+
+jobs:
+  unit-test-and-coverage:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Get secrets from AWS Secrets Manager
+        run: |
+          aws secretsmanager get-secret-value --secret-id ${{ env.AWS_SECRET_MANAGER }} --query SecretString --output text --region ${{ env.AWS_REGION }} | jq -r 'to_entries[] | "\(.key)=\(.value|tostring)"' > .config/docker/.env
+
+      - name: Build Docker image
+        run: docker build -t ${{ env.DOCKER_IMAGE_NAME }}:${{ env.DOCKER_IMAGE_TAG }} .
+
+      - name: Start containers and run tests
+        run: |
+          docker compose -f .config/docker/docker-compose-dev.yml up -d
+          .config/wait-for-it.sh localhost:5432
+          docker compose -f .config/docker/docker-compose-dev.yml exec -u 0 web sh -c "coverage run manage.py test && coverage report && coverage xml -o reports/coverage.xml"
+          docker container cp ${APP_NAME}-app:/code/reports/coverage.xml .
+          docker compose -f .config/docker/docker-compose-dev.yml down
+
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: coverage.xml
+
+  sonarqube-analysis:
+    runs-on: ubuntu-latest
+    needs: unit-test-and-coverage
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download coverage report
+        uses: actions/download-artifact@v4
+        with:
+          name: coverage-report
+          path: .
+
+      - name: SonarQube Scan
+        uses: sonarqube-quality-gate-action@master
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        with:
+          args: >
+            -Dsonar.python.coverage.reportPaths=coverage.xml
+            -Dsonar.projectKey=${{ secrets.SONAR_PROJECT_KEY }}
+            -Dsonar.host.url=${{ secrets.SONAR_HOST_URL }}
+
+  push-to-ecr:
+    runs-on: ubuntu-latest
+    needs: sonarqube-analysis
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build, tag, and push image to Amazon ECR
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          ECR_REPOSITORY: ${{ env.DOCKER_IMAGE_NAME }}
+          IMAGE_TAG: ${{ env.DOCKER_IMAGE_TAG }}
+        run: |
+          docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG .
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+
+  update-server-configs:
+    runs-on: ubuntu-latest
+    needs: push-to-ecr
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Get secrets from AWS Secrets Manager
+        run: |
+          aws secretsmanager get-secret-value --secret-id ${{ env.AWS_SECRET_MANAGER }} --query SecretString --output text --region ${{ env.AWS_REGION }} | jq -r 'to_entries[] | "\(.key)=\(.value|tostring)"' > .config/docker/.env
+
+      - name: Copy docker-compose file to server
+        run: |
+          scp -o StrictHostKeyChecking=no .config/docker/docker-compose-dev.yml ubuntu@${{ env.SERVER_NAME }}:/home/ubuntu/${{ env.APP_NAME }}/docker-compose.yml
+
+      - name: Copy environment file to server
+        run: |
+          scp -o StrictHostKeyChecking=no .config/docker/.env ubuntu@${{ env.SERVER_NAME }}:/home/ubuntu/${{ env.APP_NAME }}
+
+  deploy-to-server:
+    runs-on: ubuntu-latest
+    needs: update-server-configs
+    steps:
+      - name: Deploy to EC2 server
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ env.SERVER_NAME }}
+          username: ubuntu
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script: |
+            aws ecr get-login-password --region ${{ env.AWS_REGION }} | docker login --username AWS --password-stdin ${{ env.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com
+            docker pull ${{ env.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.DOCKER_IMAGE_NAME }}:${{ env.DOCKER_IMAGE_TAG }}
+            cd /home/ubuntu/${{ env.APP_NAME }}
+            docker compose up -d --force-recreate --build
+            docker compose exec -u 0 web python manage.py migrate --no-input
+            docker compose exec -u 0 web python manage.py collectstatic --no-input
+            docker image prune -a -f
+
+      - name: Clean up local Docker images
+        run: docker image prune -a -f 
