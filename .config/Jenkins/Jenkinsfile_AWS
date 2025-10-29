@@ -1,115 +1,409 @@
 pipeline {
     agent any
-    triggers { githubPush() }
-    options { 
-        buildDiscarder(logRotator(numToKeepStr: "3")) 
+
+    triggers {
+        githubPush()
+    }
+
+    parameters {
+        booleanParam(name: 'UPDATE_CONFIG_ONLY', defaultValue: false, description: 'Only update env/config files and restart services (no image build/push)')
+    }
+
+    options {
+        buildDiscarder(logRotator(numToKeepStr: "3"))
         disableConcurrentBuilds()
+        timeout(time: 20, unit: 'MINUTES')
+    }
 
-    }   
     environment {
-        APP_NAME = "App_Name"
-        AWS_SECRET_MANAGER = "${APP_NAME_AWS_SECRET_MANAGER}"
-        AWS_REGION = "${APP_NAME_AWS_REGION}"
-        DOCKER_IMAGE_NAME = "${APP_NAME_AWS_IMAGE_NAME}"
-        DOCKER_IMAGE_TAG = "${APP_NAME_AWS_IMAGE_TAG}"
-        AWS_ACCOUNT_ID = "${APP_NAME_AWS_ACCOUNT_ID}"
-        SERVER_NAME = "${APP_NAME_SERVER}"
-        AWS_CREDENTIALS_ID = "my-aws-creds"
-    }      
-    stages {    
+        APP_NAME = "docker-django-app"
+        SLACK_CHANNEL = "#jenkins-builds"
+        DOCKER_BUILDKIT = 1
+        COMPOSE_DOCKER_CLI_BUILD = 1
+    }
 
-// Build the app and run unit test cases/code coverage.
-        stage('Unit test and code coverage') {
-            when { branch 'develop' }
+    stages {
+        stage('Setup Environment') {
+            when {
+                branch 'develop'
+            }
             steps {
-                slackSend (color: '#00FFFF', message: "Running Unit Test cases: Job '(<${env.BUILD_URL}|Open>)' (${env.BUILD_URL})")
-                withCredentials([[
-                    $class: 'AmazonWebServicesCredentialsBinding',
-                    accessKeyVariable: 'AWS_ACCESS_KEY_ID',
-                    secretKeyVariable: 'AWS_SECRET_ACCESS_KEY',
-                    credentialsId: env.AWS_CREDENTIALS_ID
-                ]]) 
-                {     
-// Use dev env variables for running the unit test cases and build the containers                               
-                    sh """aws secretsmanager get-secret-value --secret-id ${AWS_SECRET_MANAGER} --query SecretString --output text --region ${AWS_REGION} | jq -r 'to_entries[] | \"\\(.key)=\\(.value|tostring)\"' > $WORKSPACE/.config/docker/.env"""
-                    sh 'docker build -t ${DOCKER_IMAGE_NAME}:${DOCKER_IMAGE_TAG} . && docker compose -f  .config/docker/docker-compose-dev.yml up -d && .config/wait-for-it.sh localhost:5432 && docker compose -f  .config/docker/docker-compose-dev.yml exec -u 0 web  sh -c "coverage run manage.py test && coverage report && coverage xml -o reports/coverage.xml" && docker container cp ${APP_NAME}-unit-test:/code/reports/coverage.xml .  && docker compose -f  .config/docker/docker-compose-dev.yml down'
+                script {
+                    def envConfig = [
+                        develop: [
+                            AWS_REGION: "${APP_NAME_AWS_ACCOUNT_REGION}",
+                            AWS_ACCOUNT_ID: "${APP_NAME_DEV_AWS_ACCOUNT_ID}",
+                            DOCKER_IMAGE_NAME: "${APP_NAME_DEV_DOCKER_IMAGE_NAME}",
+                            DOCKER_IMAGE_TAG: "${APP_NAME_DEV_DOCKER_IMAGE_TAG}",
+                            AWS_SECRET_MANAGER: "${APP_NAME_DEV_SECRET_MANAGER}",
+                            SERVER_IP: "${APP_NAME_DEV_SERVER_IP}",
+                            AWS_CREDENTIALS: "APP_NAME_DEV",
+                            CONFIG_FOLDER: "develop"
+                        ]
+                    ][env.BRANCH_NAME]
+
+                    if (!envConfig) error "No config defined for branch: ${env.BRANCH_NAME}"
+
+                    env.AWS_REGION = envConfig.AWS_REGION
+                    env.AWS_ACCOUNT_ID = envConfig.AWS_ACCOUNT_ID
+                    env.DOCKER_IMAGE_NAME = envConfig.DOCKER_IMAGE_NAME
+                    env.DOCKER_IMAGE_TAG = envConfig.DOCKER_IMAGE_TAG
+                    env.AWS_SECRET_MANAGER = envConfig.AWS_SECRET_MANAGER
+                    env.SERVER_IP = envConfig.SERVER_IP
+                    env.AWS_CREDENTIALS = envConfig.AWS_CREDENTIALS
+                    env.CONFIG_FOLDER = envConfig.CONFIG_FOLDER
+
+                    echo "Deploying to environment: ${env.BRANCH_NAME}"
+                    echo "AWS Region: ${env.AWS_REGION}"
+                    echo "Docker Image: ${env.DOCKER_IMAGE_NAME}"
+                    echo "Server: ${env.SERVER_IP}"
+                }
+            }
+        }
+
+        stage('Update Configs Only') {
+            when {
+                allOf {
+                    expression { params.UPDATE_CONFIG_ONLY }
+                    branch 'develop'
+                }
+            }
+            steps {
+                script {
+                    sendSlackNotification('#FFFF00', "🔧 ${env.APP_NAME}: Config-only update started: target=${env.SERVER_IP} | branch=${env.BRANCH_NAME}")
+                    echo "🔧 ${env.APP_NAME}: Config-only update started: target=${env.SERVER_IP} | branch=${env.BRANCH_NAME}"
+                    configureEnvironmentAndDockerCompose(env.SERVER_IP)
+                    restartContainers(env.SERVER_IP)
+                    echo "🔧 ${env.APP_NAME}: Config-only update completed: target=${env.SERVER_IP} | branch=${env.BRANCH_NAME}"
+                    sendSlackNotification('#36A64F', "✅ ${env.APP_NAME}: Config-only update completed: target=${env.SERVER_IP} | branch=${env.BRANCH_NAME}")
+                }
+            }
+        }
+
+        stage('Code Quality Analysis') {
+            when {
+                allOf {
+                    changeRequest(target: 'develop')
+                    expression { env.CHANGE_TARGET == 'develop' }
+                }
+            }
+            stages {
+                stage('SonarQube Code Analysis') {
+                    steps {
+                        script {
+                            def scannerHome = tool name: 'sonar-scanner', type: 'hudson.plugins.sonar.SonarRunnerInstallation'
+                            echo "🔍 ${env.APP_NAME}: SonarQube Code Analysis started"
+                            sendSlackNotification('#0099ff', "${env.APP_NAME}: SonarQube Code Analysis started: Job '${env.BUILD_URL}'", false, '#sonarqube')
+
+                            withSonarQubeEnv('sonarqube') {
+                                sh """
+                                    ${scannerHome}/bin/sonar-scanner \
+                                    -Dsonar.projectKey=${env.APP_NAME} \
+                                    -Dsonar.sources=. \
+                                    -Dsonar.python.version=3.12 \
+                                    -Dsonar.exclusions=**/migrations/**,**/tests/**,**/test_*.py,**/__pycache__/**,**/venv/**,**/env/**
+                                """
+                            }
+                            echo "🔍 ${env.APP_NAME}: SonarQube Code Analysis completed"
+                        }
+                    }
+                }
+
+                stage('Check SonarQube Quality Gate') {
+                    steps {
+                        script {
+                            def qualityGateStatus = waitForQualityGate()
+                            if (qualityGateStatus.status == 'OK') {
+                                sendSlackNotification('#00FF00', "${env.APP_NAME}: SonarQube Code Analysis successful: Job '${env.BUILD_URL}'", false, '#sonarqube')
+                            } else {
+                                def getURL = readProperties file: './.scannerwork/report-task.txt'
+                                def sonarqubeURL = "${getURL['dashboardUrl']}"
+                                sendSlackNotification('#FF0000', "${env.APP_NAME}: SonarQube Code Analysis failed: Job '${env.BUILD_URL}':\n${sonarqubeURL}", false, '#sonarqube')
+                                error "Quality Gate failed! Status: ${qualityGateStatus.status}"
+                            }
+                        }
+                    }
                 }
             }
             post {
-                success { slackSend (color: '#00FFFF', message: "APP_NAME Unit test case SUCCESSFULL: Job '(<${env.BUILD_URL}|Open>)' ") }
-                failure { slackSend (color: '#FF0000', message: "APP_NAME Unit test case FAILED: Job '(<${env.BUILD_URL}|Open>)' (${env.BUILD_URL})") }
+                always {
+                    script {
+                        // Cleanup SonarQube artifacts
+                        sh "rm -rf .scannerwork || true"
+                        echo "🧹 SonarQube artifacts cleaned up"
+                    }
+                }
+
+                success {
+                    script {
+                        sendSlackNotification('#00FF00', "✅ ${env.APP_NAME}: SonarQube Analysis completed: ${env.BRANCH_NAME}", false, '#sonarqube')
+                    }
+                }
+                failure {
+                    script {
+                        sendSlackNotification('#FF0000', "❌ ${env.APP_NAME}: SonarQube Analysis failed: ${env.BRANCH_NAME}", true, '#sonarqube')
+                    }
+                }
             }
         }
-// Run sonarqube analysis and send report to sonarqube        
-        stage('SonarQube analysis') {
-            when { branch 'develop' }
+
+        stage('Unit Test and Code Coverage') {
+            when {
+                allOf {
+                    expression { !params.UPDATE_CONFIG_ONLY }
+                    branch 'develop'
+                }
+            }
             steps {
                 script {
+                    echo "🧪 Starting ${env.APP_NAME} unit tests..."
+                    sendSlackNotification('#FFFF00', "🧪 ${env.APP_NAME}: Unit Tests started: ${env.BRANCH_NAME}")
 
-                    slackSend (channel: 'sonarqube', color: '#0099ff', message: "SONAR ANALYSIS STARTED FOR APP_NAME BACKEND DEVELOP: Job '(<${env.BUILD_URL}|Open>)'")
-                    def scannerHome = tool 'sonar-scanner';
+                    withCredentials([[
+                        $class: 'AmazonWebServicesCredentialsBinding',
+                        accessKeyVariable: 'AWS_ACCESS_KEY_ID',
+                        secretKeyVariable: 'AWS_SECRET_ACCESS_KEY', // pragma: allowlist secret
+                        credentialsId: env.AWS_CREDENTIALS
+                    ]]) {
+                        sh """
+                            mkdir -p $WORKSPACE/.config/${env.CONFIG_FOLDER}
+                            aws secretsmanager get-secret-value \
+                                --secret-id ${env.AWS_SECRET_MANAGER} \
+                                --query SecretString \
+                                --output text \
+                                --region ${env.AWS_REGION} | \
+                            jq -r 'to_entries[] | "\\(.key)=\\(.value|tostring)"' > $WORKSPACE/.config/${env.CONFIG_FOLDER}/.env
+                        """
+
+                        sh """
+                            docker build -t ${env.DOCKER_IMAGE_NAME}:${env.DOCKER_IMAGE_TAG} . && \
+                            docker compose -f .config/docker/docker-compose-dev.yml up -d && \
+                            docker compose -f .config/docker/docker-compose-dev.yml exec -u 0 web sh -c "coverage run manage.py test && coverage report && coverage xml -o reports/coverage.xml" && \
+                            docker container cp ${env.APP_NAME}-app:/code/reports/coverage.xml . && \
+                            docker compose -f .config/docker/docker-compose-dev.yml down
+                        """
+                    }
+
+                    echo "✅ ${env.APP_NAME} unit tests completed successfully"
+                    sendSlackNotification('#00FF00', "✅ ${env.APP_NAME}: Unit Tests passed: ${env.BRANCH_NAME}")
+                }
+            }
+            post {
+                failure {
+                    sendSlackNotification('#FF0000', "❌ ${env.APP_NAME}: Unit Tests failed: ${env.BRANCH_NAME}", true)
+                }
+            }
+        }
+        stage('SonarQube Analysis') {
+            when {
+                allOf {
+                    expression { !params.UPDATE_CONFIG_ONLY }
+                    branch 'develop'
+                }
+            }
+            steps {
+                script {
+                    echo "📊 Starting ${env.APP_NAME} SonarQube analysis..."
+                    sendSlackNotification('#0099ff', "📊 ${env.APP_NAME}: SonarQube Analysis started: ${env.BRANCH_NAME}", false, '#sonarqube')
+
+                    def scannerHome = tool 'sonar-scanner'
                     withSonarQubeEnv('sonarqube') {
-                        sh "${scannerHome}/bin/sonar-scanner -Dsonar.python.coverage.reportPaths=coverage.xml && rm -rf coverage.xml "
+                        sh "${scannerHome}/bin/sonar-scanner -Dsonar.python.coverage.reportPaths=coverage.xml"
                     }
 
                     qualitygate = waitForQualityGate()
                     if (qualitygate.status == "OK") {
-
-                        def msg = "${qualitygate.status}: ${env.JOB_NAME} #${env.BUILD_NUMBER}:\n${env.BUILD_URL}"
-                        slackSend (channel: 'sonarqube', color: '#00FF00', message: "APP_NAME BACKEND SONAR ANALYSIS SUCCESSFUL: Job '(<${env.BUILD_URL}|Open>)'")
-                    }
-                    else {
-                        def color
+                        echo "✅ ${env.APP_NAME} SonarQube analysis passed"
+                        sendSlackNotification('#00FF00', "✅ ${env.APP_NAME}: SonarQube Analysis passed: ${env.BRANCH_NAME}", false, '#sonarqube')
+                    } else {
                         def getURL = readProperties file: './.scannerwork/report-task.txt'
                         sonarqubeURL = "${getURL['dashboardUrl']}"
-                        def msg = "${qualitygate.status}: ${env.JOB_NAME} #${env.BUILD_NUMBER}:\n${env.BUILD_URL}"
-                        slackSend (channel: 'sonarqube', color: '#FF0000', message: "APP_NAME BACKEND SONAR ANALYSIS FAILED: Job '(<${env.BUILD_URL}|Open>)':\n${sonarqubeURL}")
-
+                        sendSlackNotification('#FF0000', "❌ ${env.APP_NAME}: SonarQube Analysis failed: ${env.BRANCH_NAME}\n${sonarqubeURL}", false, '#sonarqube')
+                        error("SonarQube quality gate failed")
                     }
                 }
-
             }
-        }
-
-// Push docker image to ECR and Update env file and docker compose file in the server
-        stage('Update docker image') {
-            when { branch 'develop' }
-            steps {
-                slackSend (color: '#FFFF00', message: "BUILD STARTED: Job '(<${env.BUILD_URL}|Open>)' (${env.BUILD_URL})")
-                withCredentials([[
-                    $class: 'AmazonWebServicesCredentialsBinding',
-                    accessKeyVariable: 'AWS_ACCESS_KEY_ID',
-                    secretKeyVariable: 'AWS_SECRET_ACCESS_KEY',
-                    credentialsId: env.AWS_CREDENTIALS_ID
-                ]])
-                {
-                    sh "aws ecr get-login-password --region ${AWS_REGION} | docker login --username AWS --password-stdin ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
-                    sh "docker tag ${DOCKER_IMAGE_NAME}:${DOCKER_IMAGE_TAG} ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${DOCKER_IMAGE_NAME}:${DOCKER_IMAGE_TAG}"
-                    sh "docker push ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${DOCKER_IMAGE_NAME}:${DOCKER_IMAGE_TAG}"
+            post {
+                always {
+                    sh "rm -rf coverage.xml .scannerwork || true"
                 }
             }
         }
 
-// Update env file and docker compose file in the server
-        stage('Update server configs') {
-            when { branch 'develop' }
-            steps {
-                    sh 'scp -o StrictHostKeyChecking=no $WORKSPACE/.config/docker/docker-compose-dev.yml ubuntu@${APP_NAME_SERVER}:/home/ubuntu/${APP_NAME}/docker-compose.yml'
-                    sh 'scp -o StrictHostKeyChecking=no $WORKSPACE/.config/docker/.env  ubuntu@${APP_NAME_SERVER}:/home/ubuntu/${APP_NAME}'
+        stage('Build and Push Docker Image') {
+            when {
+                allOf {
+                    expression { !params.UPDATE_CONFIG_ONLY }
+                    branch 'develop'
+                }
             }
-        }        
-
-// Update the server with new docker image and rebuild the containers 
-        stage('Update server') {
-            when { branch 'develop' }
             steps {
-                    sh 'ssh -o StrictHostKeyChecking=no ubuntu@${APP_NAME_SERVER} -t "aws ecr get-login-password --region ${AWS_REGION} | docker login --username AWS --password-stdin ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com && docker pull ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${DOCKER_IMAGE_NAME}:${DOCKER_IMAGE_TAG} && cd /home/ubuntu/APP_NAME && docker compose up -d --force-recreate --build && docker compose exec -u 0 web python manage.py migrate --no-input && docker compose exec -u 0 web python manage.py collectstatic --no-input && docker image prune -a -f"'
-                    sh 'docker image prune -a -f'
-                }                                  
-            post {
-                success { slackSend (color: '#00FF00', message: "APP_NAME DEV SERVER UPDATION SUCCESSFULL: Job '(<${env.BUILD_URL}|Open>)' ") }
-                failure { slackSend (color: '#FF0000', message: "APP_NAME DEV SERVER UPDATION FAILED: Job '(<${env.BUILD_URL}|Open>)' (${env.BUILD_URL})") }
-            }            
-        }   
+                script {
+                    echo "🚀 Starting ${env.APP_NAME} docker image build..."
+                    sendSlackNotification('#FFFF00', "🚀 ${env.APP_NAME}: Docker Image Build started: ${env.BRANCH_NAME}")
+
+                    sh """
+                        docker build \
+                            --build-arg BUILDKIT_INLINE_CACHE=1 \
+                            -f Dockerfile \
+                            --cache-from ${env.DOCKER_IMAGE_NAME}:latest \
+                            -t ${env.DOCKER_IMAGE_NAME}:${env.DOCKER_IMAGE_TAG} \
+                            .
+                    """
+                    dockerPush(env.DOCKER_IMAGE_NAME)
+
+                    echo "✅ ${env.APP_NAME} docker image build completed successfully"
+                    sendSlackNotification('#00FF00', "✅ ${env.APP_NAME}: Docker Image Build completed: ${env.BRANCH_NAME}")
+                }
+            }
+        }
+
+        stage('Deploy to Server') {
+            when {
+                branch 'develop'
+            }
+            steps {
+                script {
+                    echo "🚀 Starting ${env.APP_NAME} server deployment..."
+                    sendSlackNotification('#FFFF00', "🚀 ${env.APP_NAME}: Server Deployment started: ${env.BRANCH_NAME}")
+
+                    deployToServer(env.SERVER_IP)
+                    runOnServer(env.SERVER_IP, "docker compose -f docker-compose.yml exec -u 0 web python manage.py migrate --no-input")
+                    runOnServer(env.SERVER_IP, "docker compose -f docker-compose.yml exec -u 0 web python manage.py collectstatic --no-input")
+
+                    echo "✅ ${env.APP_NAME} server deployment completed successfully"
+                    sendSlackNotification('#00FF00', "✅ ${env.APP_NAME}: Server Deployment completed: ${env.BRANCH_NAME}")
+                }
+            }
+        }
+    }
+
+    post {
+        always {
+            script {
+                // Only run cleanup for develop branch
+                if (env.BRANCH_NAME == 'develop') {
+                    // Clean up workspace secrets
+                    sh "rm -f $WORKSPACE/.config/${env.CONFIG_FOLDER}/.env || true"
+                    sh "docker system prune -f || true"
+                    echo "🧹 ${env.APP_NAME}: Workspace cleanup completed"
+                }
+            }
+        }
+        success {
+            script {
+                // Only send success notification for develop branch
+                if (env.BRANCH_NAME == 'develop') {
+                    sendSlackNotification('#36A64F', "✅ ${env.APP_NAME}: Deployment successful: ${env.BRANCH_NAME}")
+                }
+            }
+        }
+        failure {
+            script {
+                // Only send failure notification for develop branch
+                if (env.BRANCH_NAME == 'develop') {
+                    sendSlackNotification('#FF0000', "❌ ${env.APP_NAME}: Deployment failed: ${env.BRANCH_NAME}", true)
+                }
+            }
+        }
+    }
+}
+
+// Updated helper to support optional channel override
+// color: Slack color string, message: text, includeUrl: append BUILD_URL, channel: override target channel
+// Defaults channel to env.SLACK_CHANNEL
+// Example override: sendSlackNotification('#00FF00', 'ok', false, '#sonarqube')
+def sendSlackNotification(color, message, includeUrl = false, channel = null) {
+    def resolvedChannel = channel ?: env.SLACK_CHANNEL
+    def fullMessage = includeUrl ? "${message}\nBuild URL: ${env.BUILD_URL}" : message
+    slackSend(channel: resolvedChannel, color: color, message: fullMessage)
+}
+
+def configureEnvironmentAndDockerCompose(server, sourceComposeName = "docker-compose") {
+    echo "Configuring environment and docker compose for server: ${server}"
+
+    withCredentials([[
+        $class: 'AmazonWebServicesCredentialsBinding',
+        accessKeyVariable: 'AWS_ACCESS_KEY_ID',
+        secretKeyVariable: 'AWS_SECRET_ACCESS_KEY', // pragma: allowlist secret
+        credentialsId: env.AWS_CREDENTIALS
+    ]]) {
+        sh """
+            mkdir -p $WORKSPACE/.config/${env.CONFIG_FOLDER}
+            aws secretsmanager get-secret-value \
+                --secret-id ${env.AWS_SECRET_MANAGER} \
+                --query SecretString \
+                --output text \
+                --region ${env.AWS_REGION} | \
+            jq -r 'to_entries[] | "\\(.key)=\\(.value|tostring)"' > $WORKSPACE/.config/${env.CONFIG_FOLDER}/.env
+        """
+    }
+
+    def sourceFile = "${sourceComposeName}-${env.CONFIG_FOLDER}.yml"
+
+    sh """
+        scp -o StrictHostKeyChecking=no $WORKSPACE/.config/docker/${sourceFile} ubuntu@${server}:/home/ubuntu/${env.APP_NAME}/docker-compose.yml &
+        scp -o StrictHostKeyChecking=no $WORKSPACE/.config/${env.CONFIG_FOLDER}/.env ubuntu@${server}:/home/ubuntu/${env.APP_NAME}/ &
+        wait
+    """
+}
+
+def dockerPush(imageName) {
+    withCredentials([[
+        $class: 'AmazonWebServicesCredentialsBinding',
+        accessKeyVariable: 'AWS_ACCESS_KEY_ID',
+        secretKeyVariable: 'AWS_SECRET_ACCESS_KEY', // pragma: allowlist secret
+        credentialsId: env.AWS_CREDENTIALS
+    ]]) {
+        sh """
+            aws ecr get-login-password --region ${env.AWS_REGION} | \
+            docker login --username AWS --password-stdin ${env.AWS_ACCOUNT_ID}.dkr.ecr.${env.AWS_REGION}.amazonaws.com
+
+            docker tag ${imageName}:${env.DOCKER_IMAGE_TAG} \
+                ${env.AWS_ACCOUNT_ID}.dkr.ecr.${env.AWS_REGION}.amazonaws.com/${imageName}:${env.DOCKER_IMAGE_TAG}
+
+            docker push ${env.AWS_ACCOUNT_ID}.dkr.ecr.${env.AWS_REGION}.amazonaws.com/${imageName}:${env.DOCKER_IMAGE_TAG}
+        """
+    }
+}
+
+def runOnServer(server, command) {
+    sh "ssh -o StrictHostKeyChecking=no ubuntu@${server} -t 'cd /home/ubuntu/${env.APP_NAME} && ${command}'"
+}
+
+def updateDockerImageOnServers(server) {
+    sh """
+        ssh -o StrictHostKeyChecking=no -o ConnectTimeout=30 ubuntu@${server} -t "
+            aws ecr get-login-password --region ${env.AWS_REGION} | \
+            docker login --username AWS --password-stdin ${env.AWS_ACCOUNT_ID}.dkr.ecr.${env.AWS_REGION}.amazonaws.com && \
+            docker pull ${env.AWS_ACCOUNT_ID}.dkr.ecr.${env.AWS_REGION}.amazonaws.com/${env.DOCKER_IMAGE_NAME}:${env.DOCKER_IMAGE_TAG}
+        "
+    """
+}
+
+def restartContainers(server) {
+    sh """
+        ssh -o StrictHostKeyChecking=no -o ConnectTimeout=30 ubuntu@${server} -t "
+            cd /home/ubuntu/${env.APP_NAME} && \
+            docker compose -f docker-compose.yml up -d --force-recreate --build && \
+            docker image prune -a -f
+        "
+    """
+}
+
+def deployToServer(server, sourceComposeName = "docker-compose") {
+    try {
+        echo "🚀 Starting deployment to ${env.APP_NAME} Server: ${server}"
+        sendSlackNotification('#FFFF00', "🚀 Deploying to ${env.APP_NAME} Server: ${server}")
+
+        configureEnvironmentAndDockerCompose(server, sourceComposeName)
+        updateDockerImageOnServers(server)
+        restartContainers(server)
+
+        echo "✅ ${env.APP_NAME} Server updated successfully: ${server}"
+        sendSlackNotification('#00FF00', "✅ ${env.APP_NAME} Server updated: ${server}")
+    } catch (Exception e) {
+        sendSlackNotification('#FF0000', "❌ ${env.APP_NAME} deployment failed: ${e.getMessage()}", true)
+        throw e
     }
 }

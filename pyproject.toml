@@ -1,0 +1,16 @@
+[project]
+name = "docker-django-config"
+version = "0.1.0"
+description = "Django web application with Docker configuration"
+requires-python = ">=3.12"
+dependencies = [
+    "django==4.2",
+    "psycopg==3.1.18",
+    "psycopg-binary==3.1.18",
+]
+
+[project.optional-dependencies]
+dev = [
+    "coverage==7.4.1",
+]
+
