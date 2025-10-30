@@ -260,6 +260,7 @@ pipeline {
 
         stage('Deploy to Server') {
             when {
+                expression { !params.UPDATE_CONFIG_ONLY }
                 branch 'develop'
             }
             steps {
